@@ -15,7 +15,6 @@
 var systemRegex = /^system\./;
 var fs = require('graceful-fs');
 var path = require('path');
-var BSON;
 var logger;
 var meta;
 
@@ -74,224 +73,121 @@ function readMetadata(collection, metadata, next) {
   });
 }
 
-/**
- * make dir
- * 
- * @function makeDir
- * @param {String} pathname - pathname of dir
- * @param {Function} next - callback
- */
-function makeDir(pathname, next) {
-
-  fs.stat(pathname, function(err, stats) {
-
-    if (err && err.code === 'ENOENT') {
-      logger('make dir at ' + pathname);
-      return fs.mkdir(pathname, function(err) {
-
-        next(err, pathname);
-      });
-
-    } else if (stats && stats.isDirectory() === false) {
-      logger('unlink file at ' + pathname);
-      return fs.unlink(pathname, function() {
-
-        logger('make dir at ' + pathname);
-        fs.mkdir(pathname, function(err) {
-
-          next(err, pathname);
-        });
-      });
-    }
-
-    next(null, pathname);
-  });
+function jsonParser() {
+    return {
+        parse: JSON.parse
+    };
 }
 
-/**
- * remove dir
- * 
- * @function rmDir
- * @param {String} pathname - path of dir
- * @param {Function} [next] - callback
- */
-function rmDir(pathname, next) {
+function bsonParser() {
+    var BSON = require('bson');
+    BSON = new BSON();
 
-  fs.readdirSync(pathname).forEach(function(first) { // database
-
-    var database = pathname + first;
-    if (fs.statSync(database).isDirectory() === false) {
-      return;
-    }
-
-    var metadata = '';
-    var collections = fs.readdirSync(database);
-    var metadataPath = path.join(database, '.metadata');
-    if (fs.existsSync(metadataPath) === true) {
-      metadata = metadataPath + path.sep;
-      delete collections[collections.indexOf('.metadata')]; // undefined is not a dir
-    }
-
-    collections.forEach(function(second) { // collection
-
-      var collection = path.join(database, second);
-      if (fs.statSync(collection).isDirectory() === false) {
-        return;
-      }
-      fs.readdirSync(collection).forEach(function(third) { // document
-
-        var document = path.join(collection, third);
-        fs.unlinkSync(document);
-        return next ? next(null, document) : '';
-      });
-
-      if (metadata !== '') {
-        fs.unlinkSync(metadata + second);
-      }
-      fs.rmdirSync(collection);
-    });
-
-    if (metadata !== '') {
-      fs.rmdirSync(metadata);
-    }
-    fs.rmdirSync(database);
-  });
+    return {
+        parse: BSON.deserialize
+    };
 }
 
-/**
- * JSON parser
- * 
- * @function fromJson
- * @param {Object} collection - collection model
- * @param {String} collectionPath - path of collection
- * @param {Function} next - callback
- */
-function fromJson(collection, collectionPath, next) {
-
-  var docsBulk = [];
-  var docs = fs.readdirSync(collectionPath);
-  var last = ~~docs.length, counter = 0;
-  if (last === 0) {
-    return next(null);
-  }
-
-  docs.forEach(function(docName) {
-
-    var doc, data;
-    try {
-      data = fs.readFileSync(collectionPath + docName);
-    } catch (err) {
-      return last === ++counter ? next(null) : null;
-    }
-    try {
-      doc = JSON.parse(data);
-    } catch (err) {
-      return last === ++counter ? next(err) : error(err);
-    }
-
-    docsBulk.push({
-      insertOne: {
-        document: doc
-      }
-    });
-
-    return last === ++counter ? collection.bulkWrite(docsBulk, next) : null;
-  });
-}
-
-/**
- * BSON parser
- * 
- * @function fromBson
- * @param {Object} collection - collection model
- * @param {String} collectionPath - path of collection
- * @param {Function} next - callback
- */
-function fromBson(collection, collectionPath, next) {
-
-  var docsBulk = [];
-  var docs = fs.readdirSync(collectionPath);
-  var last = ~~docs.length, counter = 0;
-  if (last === 0) {
-    return next(null);
-  }
-
-  docs.forEach(function(docName) {
-
-    var doc, data;
-    try {
-      data = fs.readFileSync(collectionPath + docName);
-    } catch (err) {
-      return last === ++counter ? next(null) : null;
-    }
-    try {
-      doc = BSON.deserialize(data);
-    } catch (err) {
-      return last === ++counter ? next(err) : error(err);
-    }
-
-    docsBulk.push({
-      insertOne: {
-        document: doc
-      }
-    });
-
-    return last === ++counter ? collection.bulkWrite(docsBulk, next) : null;
-  });
-}
-
-/**
- * set data to all collections available
- * 
- * @function allCollections
- * @param {Object} db - database
- * @param {String} name - path of database
- * @param {String} metadata - path of metadata
- * @param {Function} parser - data parser
- * @param {Function} next - callback
- */
-function allCollections(db, name, metadata, parser, next) {
-
-  var collections = fs.readdirSync(name);
-  var last = ~~collections.length, counter = 0;
-  if (last === 0) { // empty set
-    return next(null);
-  }
-
-  if (collections.indexOf('.metadata') >= 0) { // undefined is not a dir
-    delete collections[collections.indexOf('.metadata')];
-    last--;
-  }
-
-  collections.forEach(function(collectionName) {
-
-    var collectionPath = name + collectionName;
-    if (!fs.statSync(collectionPath).isDirectory()) {
-      var err = new Error(collectionPath + ' is not a directory');
-      return last === ++counter ? next(err) : error(err);
-    }
-    db.createCollection(collectionName, function(err, collection) {
-
-      if (err) {
-        return last === ++counter ? next(err) : error(err);
-      }
-      logger('select collection ' + collectionName);
-      meta(collection, metadata, function(err) {
-
-        if (err) {
-          error(err);
-        }
-        parser(collection, collectionPath + path.sep, function(err) {
-
-          if (err) {
-            return last === ++counter ? next(err) : error(err);
+var streamListener = function(parser, writer){
+    var collectionNameForDirectory = new RegExp('.*/([^/]+)/?$');
+    var collectionNameForFiles = new RegExp('.*/([^/]+)/[^/]+$');
+  return {
+      onDirectory: function (directoryName, callback) {
+          // Parse collection name out
+          var collectionName = collectionNameForDirectory.exec(directoryName.replace(/\\/g, '/'))[1];
+          if (collectionName === '.metadata') {
+            callback(null);
+            return;
           }
-          return last === ++counter ? next(null) : null;
-        });
-      });
-    });
-  });
-}
+          writer.createCollection(collectionName, callback);
+      },
+
+      onFile: function(name, stream, callback) {
+          var collectionName = collectionNameForFiles.exec(name.replace(/\\/g, '/'))[1];
+          if (collectionName === '.metadata') {
+              callback(null);
+              return;
+          }
+
+          var buffers = [];
+          stream.on('data',function(buffer){
+              buffers.push(buffer);
+          });
+
+
+          stream.on('end',function(){
+              writer.addDocument(collectionName, parser.parse(Buffer.concat(buffers)), callback);
+          });
+      },
+
+      finish: function(callback) {
+          writer.drain(callback);
+      }
+  };
+};
+
+var writer = function () {
+    return function (db) {
+        var dataToWrite = {};
+
+        var writeAllInCollection = function (collectionName, callback) {
+            var operations = dataToWrite[collectionName].map(function (document) {
+                return ({
+                    insertOne: {
+                        document: document
+                    }
+                });
+            });
+
+            if (operations.length === 0) {
+              callback(null);
+              return;
+            }
+            console.log('writing to collection ' + collectionName);
+            db.collection(collectionName, function (err, collection) {
+                collection.bulkWrite(operations, function(err) {
+                    delete dataToWrite[collectionName];
+                    callback(err);
+                });
+            });
+        };
+        var writer = {
+            createCollection: function(collectionName, next) {
+                db.createCollection(collectionName, next);
+            },
+
+            addDocument: function(collectionName, document, next) {
+                if (Array.isArray(dataToWrite[collectionName])) {
+                    dataToWrite[collectionName].push(document);
+                } else {
+                    dataToWrite[collectionName] = [document];
+                }
+                if (dataToWrite[collectionName].length > 50) {
+                  writeAllInCollection(collectionName, function(err) {
+                    next(err);
+                  });
+                } else {
+                    next(null);
+                }
+            },
+
+            drain: function(callback) {
+              if (Object.keys(dataToWrite).length === 0) {
+                callback(null);
+                return;
+              }
+
+              var collectionName = Object.keys(dataToWrite)[0];
+                writeAllInCollection(collectionName, function (callback, err) {
+                    error(err);
+                    writer.drain(callback);
+                }.bind(this, callback));
+            }
+        };
+
+        return writer;
+    };
+}();
 
 /**
  * drop data from some collections
@@ -341,20 +237,16 @@ function wrapper(my) {
   } else {
     switch (my.parser.toLowerCase()) {
       case 'bson':
-        BSON = require('bson');
-        BSON = new BSON();
-        parser = fromBson;
+        parser = bsonParser();
         break;
       case 'json':
         // JSON error on ObjectId and Date
-        parser = fromJson;
+        parser = jsonParser();
         break;
       default:
         throw new Error('missing parser option');
     }
   }
-
-  var discriminator = allCollections;
 
   if (my.logger === null) {
     logger = function() {
@@ -399,9 +291,6 @@ function wrapper(my) {
   function callback(err) {
 
     logger('restore stop');
-    if (my.tar) {
-      rmDir(my.dir);
-    }
 
     if (my.callback !== null) {
       logger('callback run');
@@ -412,15 +301,91 @@ function wrapper(my) {
     }
   }
 
+  function tarDataSource(tarFile) {
+    return streamingTarDataSource(fs.createReadStream(tarFile));
+  }
+
+  function streamingTarDataSource(tarStream) {
+    return {
+      begin: function(streamListener, callback) {
+          var tar = require('tar-stream');
+
+          var extract = tar.extract();
+
+          extract.on('entry', function(header, stream, next) {
+              // header is the tar header
+              if (header.type === 'directory') {
+                streamListener.onDirectory(header.name, next);
+              } else if (header.type === 'file') {
+                streamListener.onFile(header.name, stream, next);
+              } else {
+                  next();
+              }
+
+              stream.resume(); // just auto drain the stream
+          });
+
+          extract.on('finish', function() {
+              streamListener.finish(callback);
+          });
+
+          tarStream.pipe(extract);
+      }
+    };
+  }
+
+  function fileSystemDataSource(rootDir) {
+      var addCollections = function(streamListener, collections, callback) {
+          if (collections.length === 0) {
+              callback(null);
+              return;
+          }
+          var collectionName = collections.pop();
+          streamListener.onDirectory(collectionName, function(err) {error(err); addCollections(streamListener, collections, callback);});
+      };
+      var addFiles = function(streamListener, files, callback) {
+          if (files.length === 0) {
+              callback(null);
+              return;
+          }
+          var filename = files.pop();
+          streamListener.onFile(filename, fs.createReadStream(filename), function() {
+              addFiles(streamListener, files, callback);
+          });
+      };
+    return {
+      begin: function (streamListener, callback) {
+          var dirs = fs.readdirSync(rootDir);
+          if (dirs.length !== 1) {
+              callback('Found multiple directories and only support one: ' + JSON.toString(dirs));
+              return;
+          }
+
+          var dbRootDir = path.join(rootDir, dirs[0]);
+          var collections = fs.readdirSync(dbRootDir).map(function(dir) { return path.join(dbRootDir, dir);});
+          addCollections(streamListener, collections, function() {
+              var directoryArrays = fs.readdirSync(dbRootDir).map(function(dirname) {
+                  return fs.readdirSync(path.join(dbRootDir, dirname)).map(function(filename) {return path.join(dbRootDir, dirname, filename);});
+              });
+              var allFiles = [].concat.apply([], directoryArrays);
+              addFiles(streamListener, allFiles, function(err) {
+                  error(err);
+                  streamListener.finish(callback);
+              });
+          });
+      }
+    };
+  }
+
   /**
    * entry point
    * 
    * @return {Null}
    */
-  function go(root) {
+  function go(datasource) {
 
     if (my.metadata === true) {
-      metadata = path.join(root, '.metadata', path.sep);
+      metadata = path.join(my.root, '.metadata', path.sep);
     }
     require('mongodb').MongoClient.connect(my.uri, my.options,
       function(err, db) {
@@ -430,31 +395,28 @@ function wrapper(my) {
           return callback(err);
         }
 
-        function next(err) {
-
+        function importDataToDb(err) {
           if (err) {
             logger('db close');
             db.close();
             return callback(err);
           }
 
-          // waiting for `db.fsyncLock()` on node driver
-          discriminator(db, root, metadata, parser, function(err) {
-
-            logger('db close');
-            db.close();
-            callback(err);
+          datasource.begin(streamListener(parser, writer(db)), function(err) {
+              logger('db close');
+              db.close();
+              callback(err);
           });
         }
 
         if (my.drop === true) {
           logger('drop database');
-          return db.dropDatabase(next);
+          return db.dropDatabase(importDataToDb);
 
         } else if (my.dropCollections) {
           logger('drop collections');
           if (Array.isArray(my.dropCollections) === true) {
-            return someCollections(db, my.dropCollections, next);
+            return someCollections(db, my.dropCollections, importDataToDb);
           }
           return db.collections(function(err, collections) {
 
@@ -468,43 +430,23 @@ function wrapper(my) {
                 my.dropCollections.push(collectionName);
               }
             }
-            someCollections(db, my.dropCollections, next);
+            someCollections(db, my.dropCollections, importDataToDb);
           });
         }
 
-        next(null);
+        importDataToDb(null);
       });
   }
 
   if (!my.tar) {
-    return go(my.root);
+    return go(fileSystemDataSource(my.root));
   }
 
-  makeDir(my.dir, function() {
-
-    var extractor = require('tar').Extract({
-      path: my.dir
-    }).on('error', callback).on('end', function() {
-
-      var dirs = fs.readdirSync(my.dir);
-      for (var i = 0, ii = dirs.length; i < ii; ++i) {
-        var t = my.dir + dirs[i];
-        if (fs.statSync(t).isFile() === false) {
-          return go(t + path.sep);
-        }
-      }
-    });
-
-    if (my.stream !== null) { // user stream
-      logger('get tar file from stream');
-      my.stream.pipe(extractor);
-
-    } else { // filesystem stream
-      logger('open tar file at ' + my.root + my.tar);
-      fs.createReadStream(my.root + my.tar).on('error', callback).pipe(
-        extractor);
+    if (my.stream !== null) {
+      go(streamingTarDataSource(my.stream));
+    } else {
+        go(tarDataSource(my.root + my.tar));
     }
-  });
 }
 
 /**
@@ -548,3 +490,4 @@ function restore(options) {
   wrapper(my);
 }
 module.exports = restore;
+
