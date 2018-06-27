@@ -19,7 +19,7 @@
     "url": "https://github.com/spmiller/mongodb-restore.git"
   },
   "bugs": {
-    "url": "https://github.com/spmiller/mongodb-restore/issues",
+    "url": "https://github.com/spmiller/mongodb-restore/issues"
   },
   "main": "index.min.js",
   "dependencies": {
