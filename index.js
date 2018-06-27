@@ -136,8 +136,8 @@ var writer = function () {
                 callback(null);
                 return;
             }
-            console.log('writing to collection ' + collectionName);
             db.collection(collectionName, function (err, collection) {
+                error(err);
                 collection.bulkWrite(operations, function(err) {
                     delete dataToWrite[collectionName];
                     callback(err);
@@ -185,10 +185,7 @@ var writer = function () {
 
                 var collectionAndIndexes = indices.pop();
                 db.command({createIndexes: collectionAndIndexes.collectionName, indexes: collectionAndIndexes.document}, {}, function(err) {
-                    if(err){
-                        error(err);
-                    }
-
+                    error(err);
                     writer.addIndices(indices, callback);
                 });
             }
@@ -348,7 +345,8 @@ function wrapper(my) {
                 return;
             }
             var filename = files.pop();
-            streamListener.onFile(filename, fs.createReadStream(filename), function() {
+            streamListener.onFile(filename, fs.createReadStream(filename), function(err) {
+                error(err);
                 addFiles(streamListener, files, callback);
             });
         };
@@ -362,7 +360,8 @@ function wrapper(my) {
 
                 var dbRootDir = path.join(rootDir, dirs[0]);
                 var collections = fs.readdirSync(dbRootDir).map(function(dir) { return path.join(dbRootDir, dir);});
-                addCollections(streamListener, collections, function() {
+                addCollections(streamListener, collections, function(err) {
+                    error(err);
                     var directoryArrays = fs.readdirSync(dbRootDir).map(function(dirname) {
                         return fs.readdirSync(path.join(dbRootDir, dirname)).map(function(filename) {return path.join(dbRootDir, dirname, filename);});
                     });
