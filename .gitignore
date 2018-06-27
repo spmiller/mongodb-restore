@@ -29,3 +29,9 @@ build/
 # see https://npmjs.org/doc/faq.html#Should-I-check-my-node_modules-folder-into-git
 node_modules/
 bower_components/
+/.idea/mongodb-restore.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml
+.idea/
+package-lock.json
