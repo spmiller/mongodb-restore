@@ -309,20 +309,28 @@ function wrapper(my) {
                 var extract = tar.extract();
 
                 extract.on('entry', function(header, stream, next) {
-                    // header is the tar header
-                    if (header.type === 'directory') {
-                        streamListener.onDirectory(header.name, next);
-                    } else if (header.type === 'file') {
-                        streamListener.onFile(header.name, stream, next);
-                    } else {
-                        next();
+                    try{
+                        // header is the tar header
+                        if (header.type === 'directory') {
+                            streamListener.onDirectory(header.name, next);
+                        } else if (header.type === 'file') {
+                            streamListener.onFile(header.name, stream, next);
+                        } else {
+                            next();
+                        }
+                    } catch (error) {
+                        callback(error);
                     }
 
                     stream.resume(); // just auto drain the stream
                 });
 
                 extract.on('finish', function() {
-                    streamListener.finish(callback);
+                    try {
+                        streamListener.finish(callback);
+                    } catch (error) {
+                        callback(error);
+                    }
                 });
 
                 tarStream.pipe(extract);
@@ -432,14 +440,18 @@ function wrapper(my) {
             });
     }
 
-    if (!my.tar) {
-        return go(fileSystemDataSource(my.root));
-    }
+    try {
+        if (!my.tar) {
+            return go(fileSystemDataSource(my.root));
+        }
 
-    if (my.stream !== null) {
-        go(streamingTarDataSource(my.stream));
-    } else {
-        go(tarDataSource(my.root + my.tar));
+        if (my.stream !== null) {
+            go(streamingTarDataSource(my.stream));
+        } else {
+            go(tarDataSource(my.root + my.tar));
+        }
+    } catch (error) {
+        callback(error);
     }
 }
 
@@ -484,6 +496,3 @@ function restore(options) {
     wrapper(my);
 }
 module.exports = restore;
-
-
-
