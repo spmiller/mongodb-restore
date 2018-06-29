@@ -1,5 +1,5 @@
 {
-  "version": "1.6.2",
+  "version": "1.6.3",
   "name": "mongodb-restore-streaming",
   "description": "restore data from mongodb-backup (fork from https://github.com/hex7c0/mongodb-restore)",
   "keywords": [
