@@ -53,11 +53,22 @@ var streamListener = function(parser, writer, supportMetadata){
     var collectionNameForFiles = new RegExp('.*/([^/]+)/[^/]+$');
     var metadataFilenameRegexp = new RegExp('.*/[^/]+/([^/]+)$');
 
+    var getCollectionForFile =  function (regex, path) {
+        var execArr = regex.exec(path);
+        if (execArr && execArr.length > 1) {
+            return execArr[1];
+        } else {
+            throw Error('Invalid database structure');
+        }
+    };
+
+    var getMetaDataName = getCollectionForFile;
+
     var metadata = [];
     return {
         onDirectory: function (directoryName, callback) {
             // Parse collection name out
-            var collectionName = collectionNameForDirectory.exec(directoryName.replace(/\\/g, '/'))[1];
+            var collectionName = getCollectionForFile(collectionNameForDirectory, directoryName.replace(/\\/g, '/'));
             if (collectionName === '.metadata') {
                 callback(null);
                 return;
@@ -66,10 +77,10 @@ var streamListener = function(parser, writer, supportMetadata){
         },
 
         onFile: function(name, stream, callback) {
-            var collectionName = collectionNameForFiles.exec(name.replace(/\\/g, '/'))[1];
+            var collectionName = getCollectionForFile(collectionNameForFiles, name.replace(/\\/g, '/'));
             if (collectionName === '.metadata') {
                 // Extract metadata collection name
-                var metadataName = metadataFilenameRegexp.exec(name.replace(/\\/g, '/'))[1];
+                var metadataName = getMetaDataName(metadataFilenameRegexp, name.replace(/\\/g, '/'));
                 //parse the metadata file
 
                 // Callback and return only if metadata support disabled
